@@ -1,0 +1,610 @@
+---
+title: "group1_HMO"
+author: "Mo"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  word_document: default
+  pdf_document: default
+---
+# Loading Libraries
+
+```{r LoadingLibraries}
+if (!require("tidyverse")) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if (!require("ggplotly")) install.packages("plotly", repos = "http://cran.us.r-project.org")
+if (!require("ggplot2")) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if (!require("hrbrthemes")) install.packages("hrbrthemes", repos = "http://cran.us.r-project.org")
+if (!require("viridis")) install.packages("viridis", repos = "http://cran.us.r-project.org")
+if (!require("kernlab")) install.packages("kernlab", repos = "http://cran.us.r-project.org")
+if (!require("rpart")) install.packages("rpart", repos = "http://cran.us.r-project.org")
+if (!require("rpart.plot")) install.packages("rpart.plot", repos = "http://cran.us.r-project.org")
+if (!require("treemapify")) install.packages("treemapify", repos = "http://cran.us.r-project.org")
+if (!require("caret")) install.packages("caret", repos = "http://cran.us.r-project.org")
+if (!require("randomForest")) install.packages("randomForest", repos = "http://cran.us.r-project.org")
+listOfPackages <- c("tidyverse", "ggplot2", "treemapify", "hexbin", "RColorBrewer", "caret", "plotly","hrbrthemes","viridis","kernlab","rpart","rpart.plot","caret","randomForest")
+lapply(listOfPackages, require, character.only = TRUE)
+```
+# Importing the Data
+
+```{r ReadingData}
+df <- read_csv('https://intro-datascience.s3.us-east-2.amazonaws.com/HMO_data.csv')
+```
+# Understanding the Data
+
+```{r ColumnsInDataset}
+colnames(df)
+str(df)
+```
+# Cleaning the Data
+
+*Descriptive Statistics aboutthe data*
+```{r}
+hmoData <- df
+summary(df)
+```
+
+*Checking the how many null values we have in out data*
+```{r CheckingForNullValues}
+sum(is.na(hmoData)) # 158 null values
+
+# Checking each columns for number of nulls
+colSums(is.na(hmoData))
+# we can see that we have 78 nulls in bmi and 80 nulls in hypertension.
+
+summary(hmoData$bmi)
+```
+
+*Filling the missing values by interpolation*
+```{r MissingValuesInterpolation-BMI}
+#There are null values in bmi and hypertension columns. These columns will be interpolated to fill the missing values.
+hmoData$bmi <- imputeTS::na_interpolation(hmoData$bmi)
+if(!sum(is.na(hmoData$bmi))) cat("BMI interpolated")
+
+# Since we know that we have many missing values in BMI, lets clean them.
+hmoData$hypertension <- imputeTS::na_interpolation(hmoData$hypertension)
+if(!sum(is.na(hmoData$hypertension))) cat("Hypertension interpolated")
+```
+
+# Visualizing the columns for some EDA
+```{r}
+hmoData$hypertension <- as.integer(hmoData$hypertension)
+hist(hmoData$hypertension, breaks= 2)
+```
+
+```{r AgeAnalysis}
+#Creating a histogram for the age
+hist(hmoData$age, breaks= 20)
+#we can observe that the hmoData is non-uniform as there are lot of people with age below 20.
+```
+
+```{r AgeAnalysis2}
+# Checking for outliers for age
+boxplot(hmoData$age) # not clear outliers
+```
+
+```{r}
+violin_ageBmi <- ggplot(hmoData, aes(age,bmi))
+violin_ageBmi<-  violin_ageBmi + geom_violin() + labs(title="Age - BMI distribution",
+       subtitle="From the plot, we can see that BMI distribution is maximum around 30\nApproximamtely 42yo's have the least and highest BMI",
+       caption="HMO Data",
+       x="Age",
+       y="BMI")
+violin_ageBmi
+```
+
+```{r AgeAnalysisVScost}
+# checking for a correlation b/w age and cost
+hmoData %>% ggplot() +
+  aes(x=age, y=cost) +
+  geom_point(color= 'blue') +
+  geom_smooth(method="lm", se=FALSE) +
+  ggtitle("Age vs Cost")
+```
+
+
+```{r BMIAnalysis-Outliers}
+# checking for outliers
+boxplot(hmoData$bmi) # not clear outliers
+```
+
+*Removinfg Outliers*
+```{r ComputingQuartilesForIdentifyingOutliers}
+quartiles <- quantile(hmoData$bmi, probs=c(.25, .75), na.rm = FALSE)
+IQR <- IQR(hmoData$bmi)
+Lower <- quartiles[1] - 1.5*IQR
+Upper <- quartiles[2] + 1.5*IQR
+hmoData <- subset(hmoData, hmoData$bmi > Lower & hmoData$bmi <= Upper-1)
+```
+
+```{r}
+boxplot(hmoData$bmi) # not more outliers
+```
+```{r BMIAnalysis}
+hist(hmoData$bmi, breaks= 20)
+```
+
+```{r CorrelationBMIvCost}
+# checking for a corelation b/w bmi and cost
+hmoData %>% ggplot() +
+  aes(x=bmi, y=cost) +
+  geom_point(color= 'red') +
+  geom_smooth(method="lm", se=FALSE) +
+  ggtitle("BMI vs Cost")
+```
+
+```{r}
+hmoData %>% ggplot() +
+  geom_bin2d(mapping = aes(x = bmi, y = cost))
+
+# install.packages("hexbin")
+hmoData %>% ggplot() +
+  geom_hex(mapping = aes(x = bmi, y = cost))
+```
+
+
+```{r NumberOfChildren}
+hist(hmoData$children, breaks=5)
+```
+
+*Summarizing the children column*
+```{r}
+aggr <- hmoData %>% group_by(children) %>% summarise(total_count=n(),
+                                                       .groups = 'drop') %>% as.data.frame()
+aggr$percent <- (aggr$total_count / nrow(hmoData)) * 100
+aggr
+```
+
+
+```{r NumberOfChildren-Outliers}
+boxplot(hmoData$children) # no outliers
+```
+
+```{r CorrelationNumberOfChildrenvsCost}
+# checking for a correlation b/w children and cost
+hmoData %>% ggplot() +
+  aes(x=children, y=cost) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE) +
+  ggtitle("Number of children vs Cost")
+```
+
+*Analysing the locations*
+
+```{r}
+# The following columns can be converted into categorical hmoData.
+unique(hmoData$location)
+# cost_location <- hmoData %>% group_by(location) %>% summarise(Avg_Cost = mean(cost))
+# barplot(cost_location$Avg_Cost)
+```
+
+*Analysisng Smoker Trends*
+
+```{r}
+cost_smoker <- hmoData %>% group_by(smoker) %>% summarise(Avg_Cost = mean(cost))
+barplot(cost_smoker$Avg_Cost)
+summary(hmoData$cost[hmoData$smoker =="yes"])
+summary(hmoData$cost[hmoData$smoker =="no"])
+```
+
+```{r}
+hmoData %>%
+  ggplot( aes(x=smoker, y=cost, color=smoker)) +
+    scale_fill_viridis(discrete = TRUE, alpha=0.6) +
+    geom_jitter( size=0.4, alpha=0.9) +
+    theme_ipsum() +
+    theme(
+      legend.position="none",
+      plot.title = element_text(size=11)
+    )
+    xlab("Smoker Yes/No")
+```
+
+*Analysisng Gender Trends*
+```{r}
+cost_gender <- hmoData %>% group_by(gender) %>% summarise(Avg_Cost = mean(cost))
+barplot(cost_gender$Avg_Cost)
+summary(hmoData$cost[hmoData$gender =="male"])
+summary(hmoData$cost[hmoData$gender =="female"])
+```
+
+```{r}
+hmoData %>%
+  ggplot( aes(x=gender, y=cost, color=gender)) +
+    scale_fill_viridis(discrete = TRUE, alpha=0.6) +
+    geom_jitter( size=0.4, alpha=0.9) +
+    theme_ipsum() +
+    theme(
+      legend.position="none",
+      plot.title = element_text(size=11)
+    )
+    xlab("Gender Male/Female")
+```
+
+
+```{r HypertensionPieChart}
+pie(table(hmoData$hypertension), labels = c('Without Hypertension', 'With hypertension'))
+
+```
+
+```{r}
+aggr <- hmoData %>% group_by(hypertension) %>% summarise(total_count=n(),
+                                                       .groups = 'drop') %>% as.data.frame()
+aggr$percent <- (aggr$total_count / nrow(hmoData)) * 100
+aggr
+```
+
+```{r}
+sum(hmoData$hypertension > 0 & hmoData$hypertension < 1)
+```
+
+*Cost Analysis*
+
+```{r}
+summary(hmoData$cost)
+```
+
+```{r}
+hist(hmoData$cost, breaks = 20)
+```
+
+```{r}
+boxplot( hmoData$cost, hmoData = hmoData)
+```
+
+*Creating Map based on average cost for each location*
+```{r}
+mapDF <- hmoData %>% group_by(location) %>% summarise(mean(cost))
+```
+
+```{r}
+us <- map_data("state")
+us$state_name <- tolower(us$region)
+coord <- data.frame(loc=tolower(mapDF$location),avg_cost=mapDF$`mean(cost)`)
+mergedDF <- merge(us,coord, by.x='state_name',by.y='loc')
+mergedDF <- mergedDF %>% arrange(order)
+
+```
+
+```{r}
+
+```
+
+
+```{r}
+mergedDF %>% ggplot(aes(map_id= region)) + 
+  geom_polygon(color="black",aes(x=long,y=lat, group=group, fill=avg_cost))  +
+  expand_limits(x=mergedDF$long, y=mergedDF$lat) +
+  coord_map("mercator") +
+  ggtitle("Mean Cost for Each Location")
+```
+
+*Descriptive Statistics of all columns*
+```{r}
+summary(hmoData$cost[hmoData$location_type =="Urban"])
+summary(hmoData$cost[hmoData$location_type =="Country"])
+```
+
+```{r}
+summary(hmoData$cost[hmoData$yearly_physical =="No"])
+summary(hmoData$cost[hmoData$yearly_physical =="Yes"])
+```
+
+```{r}
+summary(hmoData$cost[hmoData$exercise =="Active"])
+summary(hmoData$cost[hmoData$exercise =="Not-Active"])
+```
+
+```{r}
+summary(hmoData$cost[hmoData$married =="Married"])
+summary(hmoData$cost[hmoData$married =="Not_Married"])
+```
+
+```{r}
+summary(hmoData$cost[hmoData$gender =="male"])
+summary(hmoData$cost[hmoData$gender =="female"])
+```
+```{r}
+unique(hmoData$location)
+hmoData$location <- as.factor(hmoData$location)
+```
+
+```{r}
+hmoData %>%
+  # filter(location_typeIsUrban==1) %>%
+ggplot( aes(age, cost, color=bmi)) +
+  geom_point() +
+  theme_bw()
+# p <- p +  scale_shape_manual(values = c(0,23))
+# ggplotly(p)
+
+```
+
+```{r}
+hmoData %>%
+  # filter(location_typeIsUrban==1) %>%
+ggplot( aes(age, cost, color=smoker)) +
+  geom_point() +
+  theme_bw()
+# p <- p +  scale_shape_manual(values = c(0,23))
+# ggplotly(p)
+```
+
+```{r}
+hmoData %>%
+  # filter(location_typeIsUrban==1) %>%
+ggplot( aes(age, cost, color=gender)) +
+  geom_point() +
+  theme_bw()
+# p <- p +  scale_shape_manual(values = c(0,23))
+# ggplotly(p)
+```
+
+#Data Preperation for Modeling
+```{r DataPrepForModelTraining}
+prepare_data_for_model <- function(df){
+  cat("Preparing dataframe for fitting the model....")
+  cat("\nRenaming the columns. Current column names are : \n",colnames(df), "\n")
+  df <- df[,names(df)!='X']
+  df<-
+    df %>%
+    rename(isSmoker = smoker
+           ,gender_isMale = gender
+           ,exercise_isActive = exercise
+           ,location_typeIsUrban = location_type)
+  cat("\nAfter renaming : ",colnames(df))
+  # df$isSmoker <- as.integer(df$isSmoker)
+  df$married <- as.integer(ifelse(df$married == "Married", 1, 0))
+  df$gender_isMale <- as.integer(ifelse(df$gender_isMale == "male", 1, 0))
+  df$exercise_isActive <- as.integer(ifelse(df$exercise_isActive == "Active", 1, 0))
+  df$location_typeIsUrban <- as.integer(ifelse(df$location_typeIsUrban == "Urban", 1, 0))
+  df$isSmoker <- as.integer(ifelse(df$isSmoker == "yes", 1, 0))
+  df$yearly_physical <- as.integer(ifelse(df$yearly_physical == "Yes", 1, 0))
+  df$Age_Category <- NA
+  df <- mutate(df, Age_Category = ifelse(age %in% 0:21, "Young Adults"
+                                          ,ifelse(age %in% 21:36, "Adults"
+                                          ,ifelse(age %in% 36:51, "Middle Aged Adults", "Old Aged Adults"))))
+  df$location <-  as.integer(ifelse(df$location == 'CONNECTICUT', 0,
+                                ifelse(df$location == 'RHODE ISLAND', 1,
+                                ifelse(df$location == 'MASSACHUSETTS', 2,
+                                ifelse(df$location == 'PENNSYLVANIA', 3,
+                                ifelse(df$location == 'MARYLAND', 4,
+                                ifelse(df$location == 'NEW JERSEY', 5,
+                                ifelse(df$location == 'NEW YORK', 6, 'NA'
+                                       ))))))))
+
+  df$education_level <-  as.integer(ifelse(df$education_level == 'Bachelor', 0,
+                                ifelse(df$education_level == 'Master', 1,
+                                ifelse(df$education_level == 'PhD', 2,
+                                ifelse(df$education_level == 'No College Degree', 3, 'NA')))))
+  return(df)
+}
+```
+
+```{r}
+updatedHMOdata <- prepare_data_for_model(hmoData)
+updatedHMOdata
+```
+
+```{r}
+corr <- cor(updatedHMOdata[, unlist(lapply(updatedHMOdata, is.numeric))], use = "complete.obs")
+heatmap(corr, Colv = NA, Rowv = NA)
+```
+
+```{r DataPrepForModelTraining-Factorizing}
+factorizing_data_for_model <- function(df){
+  cat("Preparing dataframe for fitting the model....")
+  df$isSmoker<-as.factor(df$isSmoker)
+  df$location_typeIsUrban<-as.factor(df$location_typeIsUrban)
+  df$exercise_isActive<- as.factor(df$exercise_isActive)
+  df$married<-as.factor(df$married)
+  df$gender_isMale<-as.factor(df$gender_isMale)
+  df$yearly_physical<-as.factor(df$yearly_physical)
+  df$hypertension<-as.factor(df$hypertension)
+  df$education_level <- as.factor(df$education_level)
+  df$Age_Category <- as.factor(df$Age_Category)
+  df$location <- as.factor(df$location)
+  return(df)
+}
+```
+
+```{r VariableFactorizatino}
+updatedHMOdata<-factorizing_data_for_model(updatedHMOdata)
+```
+
+```{r CreateDataPartition}
+summary(updatedHMOdata$cost)
+str(updatedHMOdata)
+```
+
+#Assuming Expensive Criteria
+```{r}
+quartiles <- quantile(updatedHMOdata$cost, probs=c(.25,.75), na.rm = FALSE)
+IQR <- IQR(updatedHMOdata$cost)
+Lower <- quartiles[1] - 1.5*IQR
+Upper <- quartiles[2] + 1.5*IQR 
+Lower
+Upper
+quartiles
+```
+
+```{r}
+updatedHMOdata$expensive <- as.factor(ifelse(updatedHMOdata$cost>quartiles[2],TRUE,FALSE))
+updatedHMOdata
+```
+
+#Visualizations With Expensive
+
+```{r}
+df_age <- updatedHMOdata %>%
+  group_by(age, expensive, cost)
+
+plot_e1 <- ggplot(data = df_age, aes(x = age,y = cost, fill = expensive)) + 
+  geom_bar(stat='identity') + scale_fill_brewer(palette = 14)
+plot_e1 <- plot_e1 + labs(title = 'Expensive by Age', x = 'Ages')
+plot_e1
+```
+
+```{r}
+plot_e2 <- ggplot(data = updatedHMOdata, aes(x = isSmoker, fill = expensive)) + 
+  geom_bar() + scale_fill_brewer(palette = 14)
+plot_e2 <- plot_e2 + labs(title = 'smoker Vs Non-smoker', x = 'Activity')
+plot_e2
+```
+
+
+# Regression Model
+```{r Regression Model}
+lmOut <- lm(data = updatedHMOdata, cost ~ age + bmi + children + isSmoker + exercise_isActive + hypertension)
+summary(lmOut)
+```
+
+```{r}
+saveRDS(lmOut, "../ist687_hmo/lm_model.rds")
+my_lm_model <- readRDS("../ist687_hmo/lm_model.rds")
+```
+
+```{r Approach1RegressionPrediction-TrainTestData}
+test_file_DF<- data.frame(read_csv('..//HMO_TEST_data_sample.csv'))
+test_file_DF <- prepare_data_for_model(test_file_DF)
+test_file_DF <- factorizing_data_for_model(test_file_DF)
+test_file_DF
+
+test_file_DF_y<- data.frame(read_csv('..//HMO_TEST_data_sample_solution.csv'))
+```
+
+```{r Approach1RegressionPrediction-TestData}
+costPrediction <- predict(my_lm_model,test_file_DF)
+cat(costPrediction)
+```
+
+```{r Approach1SVM}
+set.seed(1234)
+trainSet <- createDataPartition(y = updatedHMOdata$expensive , p= 0.8, list = FALSE)
+trainData <- updatedHMOdata[trainSet,]
+testData <- updatedHMOdata[-trainSet,]
+svmModel <- ksvm(expensive ~ age + bmi + children + isSmoker +  exercise_isActive + hypertension,
+                 data = trainData, C = 5, cross =3, prob.model =TRUE)
+```
+
+```{r Approach1SVMConfusionMatrix}
+test <- testData
+predOut <- predict(svmModel, newdata = test, type = "response")
+# predOut
+
+confusionMatrix(predOut, testData$expensive)
+```
+
+```{r}
+# save svm
+saveRDS(svmModel, "../ist687_hmo/svm_model.rds")
+my_svm_model <- readRDS("../ist687_hmo/svm_model.rds")
+```
+
+```{r}
+#predict people for which healthcare would be expensive
+temp_data <- test_file_DF
+temp_data$cost <- costPrediction
+predDF <- predict(my_svm_model, newdata = temp_data)
+predDF
+```
+
+```{r}
+#using confusion matrix to check performance of model
+test_file_DF_y$expensive
+confMatrix<-confusionMatrix(predDF, as.factor(test_file_DF_y$expensive))
+plot(confMatrix$table, color = c("cyan", "blue"), conf.level = 0, margin = 1, main = "Confusion Matrix")
+confMatrix
+```
+
+```{r RPART}
+#Decision Tree:
+#install.packages("caret") 
+library(e1071)
+```
+
+```{r}
+tree_train_set <- data.frame(
+                     children=trainData$children,
+                     isSmoker=trainData$isSmoker,
+                     exercise_isActive = trainData$exercise_isActive,
+                     hypertension =trainData$hypertension,
+                     bmi = trainData$bmi,
+                     age = trainData$age,
+                     expensive =trainData$expensive)
+
+tree_test_set <- data.frame(
+                     children=testData$children,
+                     isSmoker=testData$isSmoker,
+                     exercise_isActive = testData$exercise_isActive,
+                     hypertension =testData$hypertension,
+                     bmi = testData$bmi,
+                     age = testData$age,
+                     expensive =testData$expensive)
+```
+
+
+```{r}
+trctrl<- trainControl(method="repeatedcv",number=50)
+tree_df <- rpart(expensive ~.,data = tree_train_set, method='class')
+rpart.plot(tree_df)
+summary(tree_df)
+# head(tree_train_set)
+```
+
+```{r RandomForest}
+rf <- randomForest(expensive~., data=tree_train_set, proximity=TRUE)
+
+p1 <- predict(rf, tree_test_set)
+confusionMatrix(p1, test$ expensive)
+
+```
+
+```{r}
+# SAVE RF Model
+saveRDS(rf, "../ist687_hmo/rf_model.rds")
+my_rf_model <- readRDS("../ist687_hmo/rf_model.rds")
+```
+
+
+```{r}
+# testDF_DT <- testDF[,names(testDF)!= 'age']
+# testDF_DT <- testDF_DT[,names(testDF_DT)!= 'cost']
+# testDF_DT <- testDF_DT[,names(testDF_DT)!= 'X']
+# testDF_DT$location <- as.factor(testDF_DT$location)
+p1 <- predict(my_rf_model, test_file_DF)
+rf_cm <- confusionMatrix(p1, as.factor(test_file_DF_y$expensive))
+rf_cm
+plot(rf_cm$table, color = c("cyan", "blue"), conf.level = 0, margin = 1, main = "Confusion Matrix")
+```
+
+```{r Apriori}
+library(arules)
+library(arulesViz)
+#df <- matrix(df4)
+
+df_new <- data.frame(ageGroup=updatedHMOdata$Age_Category,
+                     children=updatedHMOdata$children,
+                     smoker=updatedHMOdata$isSmoker,
+                     location=updatedHMOdata$location,
+                     location_type=updatedHMOdata$location_typeIsUrban,
+                     education_level=updatedHMOdata$education_level,
+                     yearly_physical = updatedHMOdata$yearly_physical,
+                     exercise = updatedHMOdata$exercise_isActive,
+                     married =updatedHMOdata$married,
+                     hypertension =updatedHMOdata$hypertension,
+                     gender=updatedHMOdata$gender_isMale,
+                     expensive =updatedHMOdata$expensive)
+
+df_newer <- as(df_new, 'transactions')
+
+datarules <- apriori(df_newer,
+ parameter=list(supp=0, conf=0),
+ control=list(verbose=F),
+ appearance=list(default="lhs",rhs=("expensive=TRUE")))
+
+```
+
+```{r InspectRules}
+inspect(datarules)
+inspectDT(datarules)
+```
